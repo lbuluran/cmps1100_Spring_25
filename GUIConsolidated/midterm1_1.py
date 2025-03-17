@@ -1,0 +1,293 @@
+import random
+import tkinter as tk
+from tkinter import messagebox
+from PIL import Image, ImageTk
+from dataclasses import dataclass
+
+# Card values for Hi-Lo counting system
+HI_LO_VALUES = {
+    '2': 1, '3': 1, '4': 1, '5': 1, '6': 1,
+    '7': 0, '8': 0, '9': 0,
+    '10': -1, 'J': -1, 'Q': -1, 'K': -1, 'A': -1
+}
+
+@dataclass
+class Card:
+    suit: str
+    rank: str
+
+    def __str__(self):
+        return f"{self.rank} of {self.suit}"
+
+class Deck:
+    suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades']
+    ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace']
+    
+    def __init__(self, num_decks=1):
+        self.num_decks = num_decks
+        self.cards = []
+        for _ in range(num_decks):
+            for suit in self.suits:
+                for rank in self.ranks:
+                    self.cards.append(Card(suit, rank))
+        self.shuffle()
+
+    def shuffle(self):
+        random.shuffle(self.cards)
+
+    def deal_card(self):
+        if len(self.cards) == 0:
+            return None
+        return self.cards.pop()
+
+class CardCounter:
+    def __init__(self, num_decks=1):
+        self.running_count = 0
+        self.num_decks = num_decks
+        self.cards_dealt = 0
+
+    def update_count(self, card: Card):
+        if card.rank in ['2', '3', '4', '5', '6']:
+            self.running_count += 1
+        elif card.rank in ['10', 'Jack', 'Queen', 'King', 'Ace']:
+            self.running_count -= 1
+        self.cards_dealt += 1
+
+    def true_count(self, remaining_cards: int) -> float:
+        remaining_decks = remaining_cards / 52.0
+        if remaining_decks == 0:
+            return self.running_count
+        return self.running_count / remaining_decks
+
+    def reset(self):
+        self.running_count = 0
+        self.cards_dealt = 0
+
+# GUI with fixes
+class CardCountingGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Blackjack Card Counting")
+        self.root.geometry("800x600")
+
+        self.deck = Deck(num_decks=1)
+        self.counter = CardCounter(num_decks=1)
+        self.running_count = 0
+        self.attempts = []
+        self.current_card = None
+        self.mode = None  
+
+        self.canvas = tk.Canvas(self.root, width=400, height=300, bg="lightgray")
+        self.canvas.pack()
+
+        self.running_count_label = tk.Label(self.root, text="Running Count: 0", font=('Arial', 14))
+        self.running_count_label.pack()
+
+        self.true_count_label = tk.Label(self.root, text="True Count: 0.00", font=('Arial', 14))
+        self.true_count_label.pack()
+
+        self.tutorial_button = tk.Button(self.root, text="Start Tutorial Mode", width=20, command=self.start_tutorial_mode)
+        self.tutorial_button.pack()
+
+        self.automated_button = tk.Button(self.root, text="Start Automated Mode", width=20, command=self.start_automated_mode)
+        self.automated_button.pack()
+
+        self.card_image_item = None
+
+        self.root.bind("<Return>", self.handle_enter_key)
+        self.root.bind("<q>", self.quit_program)
+
+    def start_tutorial_mode(self):
+        self.mode = "tutorial"
+        self.counter.reset()
+        self.deck.shuffle()
+        self.attempts = []
+        self.display_card()
+
+    def start_automated_mode(self):
+        self.mode = "automated"
+        self.counter.reset()
+        self.deck.shuffle()
+        self.display_card()
+
+    def display_card(self, event=None):
+        if len(self.deck.cards) == 0:
+            messagebox.showinfo("Game Over", "The deck is empty.")
+            return
+
+        self.current_card = self.deck.deal_card()
+        self.counter.update_count(self.current_card)
+        remaining_cards = len(self.deck.cards)
+        true_count = self.counter.true_count(remaining_cards)
+
+        card_image = Image.open(f"cards/{self.current_card.rank}_{self.current_card.suit}.png")
+        card_image = card_image.resize((100, 150))
+        card_photo = ImageTk.PhotoImage(card_image)
+
+        if self.card_image_item is None:
+            self.card_image_item = self.canvas.create_image(200, 150, image=card_photo)
+        else:
+            self.canvas.itemconfig(self.card_image_item, image=card_photo)
+
+        self.canvas.image = card_photo
+
+        self.running_count_label.config(text=f"Running Count: {self.counter.running_count}")
+        self.true_count_label.config(text=f"True Count: {true_count:.2f}")
+
+        if self.mode == "tutorial":
+            self.ask_for_guess()
+        elif self.mode == "automated":
+            self.wait_for_input()
+
+    def ask_for_guess(self):
+        self.guess_label = tk.Label(self.root, text="Enter Running Count Guess:", font=('Arial', 12))
+        self.guess_label.pack()
+
+        self.guess_entry = tk.Entry(self.root)
+        self.guess_entry.pack()
+
+        self.submit_button = tk.Button(self.root, text="Submit", command=self.check_guess)
+        self.submit_button.pack()
+
+        self.guess_entry.bind("<Return>", self.check_guess)
+
+    def check_guess(self, event=None):
+        try:
+            user_guess = int(self.guess_entry.get())
+            is_correct = user_guess == self.counter.running_count
+            if is_correct:
+                messagebox.showinfo("Correct Guess", "✅ Correct! The count is updated.")
+            else:
+                messagebox.showinfo("Incorrect Guess", f"❌ Incorrect. The correct running count is {self.counter.running_count}.")
+            
+            self.guess_label.destroy()
+            self.guess_entry.destroy()
+            self.submit_button.destroy()
+
+            self.display_card()
+
+        except ValueError:
+            messagebox.showinfo("Invalid Input", "❌ Invalid input. Please enter a number.")
+
+    def wait_for_input(self):
+        if not hasattr(self, "info_label"):
+            self.info_label = tk.Label(self.root, text="Press Enter for the next card or 'q' to quit.", font=('Arial', 12))
+            self.info_label.pack()
+
+    def handle_enter_key(self, event=None):
+        if self.mode == "automated":
+            if hasattr(self, "info_label") and self.info_label is not None:
+                self.info_label.destroy()
+                self.info_label = None  # Prevent accidental re-use
+            self.display_card()
+
+    def quit_program(self, event=None):
+        messagebox.showinfo("Game Over", "The deck is empty.")
+        self.root.quit()
+
+def main():
+    root = tk.Tk()
+    app = CardCountingGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
+
+
+import unittest
+from unittest.mock import patch, MagicMock
+from io import StringIO
+import tkinter as tk
+from tkinter import messagebox
+from PIL import Image, ImageTk
+
+# Importing the classes from the main script
+from __main__ import CardCountingGUI, Deck, CardCounter
+
+class TestCardCountingGUI(unittest.TestCase):
+
+    @patch('tkinter.Tk')  # Mock Tkinter root window
+    def test_gui_initialization(self, mock_tk):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        self.assertIsNotNone(app.root)
+        self.assertIsNotNone(app.canvas)
+        self.assertIsNotNone(app.running_count_label)
+        self.assertIsNotNone(app.true_count_label)
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox
+    @patch.object(CardCountingGUI, 'display_card', return_value=None)
+    def test_start_tutorial_mode(self, mock_display, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_tutorial_mode()
+        self.assertEqual(app.mode, "tutorial")
+        self.assertTrue(mock_display.called)
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox
+    @patch.object(CardCountingGUI, 'display_card', return_value=None)
+    def test_start_automated_mode(self, mock_display, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_automated_mode()
+        self.assertEqual(app.mode, "automated")
+        self.assertTrue(mock_display.called)
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox to avoid popups
+    def test_check_guess_correct(self, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_tutorial_mode()
+
+        # Mock the user entering the correct guess (Running count = 0)
+        app.counter.running_count = 0  # Correct guess
+        with patch('builtins.input', return_value='0'):  # Simulate user typing '0' in the input field
+            app.check_guess()
+        mock_messagebox.assert_called_with("Correct Guess", "✅ Correct! The count is updated.")
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox to avoid popups
+    def test_check_guess_incorrect(self, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_tutorial_mode()
+
+        # Mock the user entering the incorrect guess (Running count = 0 but user enters '1')
+        app.counter.running_count = 0  # Correct guess would be 0
+        with patch('builtins.input', return_value='1'):  # Simulate user typing '1' in the input field
+            app.check_guess()
+        mock_messagebox.assert_called_with("Incorrect Guess", "❌ Incorrect. The correct running count is 0.")
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox to avoid popups
+    @patch.object(CardCountingGUI, 'display_card', return_value=None)
+    def test_deal_card_automated_mode(self, mock_display, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_automated_mode()
+
+        # Simulate pressing Enter to deal the next card in automated mode
+        app.handle_enter_key()
+        self.assertTrue(mock_display.called)
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox to avoid popups
+    @patch.object(CardCountingGUI, 'display_card', return_value=None)
+    def test_deal_card_tutorial_mode(self, mock_display, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+        app.start_tutorial_mode()
+
+        # Simulate pressing Enter to move to the next card
+        app.handle_enter_key()
+        self.assertTrue(mock_display.called)
+
+    @patch('tkinter.messagebox.showinfo')  # Mock messagebox to avoid popups
+    def test_quit_program(self, mock_messagebox):
+        root = MagicMock()  # Mocking the Tk root window
+        app = CardCountingGUI(root)
+
+        with patch('builtins.input', return_value='q'):  # Simulate the user pressing 'q' to quit
+            app.quit_program()
+        mock_messagebox.assert_called_with("Game Over", "The deck is empty.")  # Simulate game over message
+
+if __name__ == "__main__":
+    unittest.main(exit=False)  # Prevent unittest from closing the program
+
